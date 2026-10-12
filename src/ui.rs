@@ -1075,6 +1075,14 @@ mod tests {
         event::KeyEvent::new(code, KeyModifiers::NONE)
     }
 
+    fn press_event(code: KeyCode) -> event::KeyEvent {
+        event::KeyEvent::new_with_kind(code, KeyModifiers::NONE, event::KeyEventKind::Press)
+    }
+
+    fn release_event(code: KeyCode) -> event::KeyEvent {
+        event::KeyEvent::new_with_kind(code, KeyModifiers::NONE, event::KeyEventKind::Release)
+    }
+
     fn quit_event() -> io::Result<Event> {
         Ok(Event::Key(key_event(KeyCode::Char('q'))))
     }
@@ -1282,57 +1290,35 @@ mod tests {
         let mut ui = test_ui();
         assert_eq!(ui.playback_state, PlaybackState::Playing);
 
-        let press = event::KeyEvent::new_with_kind(
-            KeyCode::Char(' '),
-            KeyModifiers::NONE,
-            event::KeyEventKind::Press,
-        );
-        let release = event::KeyEvent::new_with_kind(
-            KeyCode::Char(' '),
-            KeyModifiers::NONE,
-            event::KeyEventKind::Release,
-        );
-
-        ui.handle_event(Event::Key(press));
+        ui.handle_event(Event::Key(press_event(KeyCode::Char(' '))));
         assert_eq!(ui.playback_state, PlaybackState::Paused);
 
         // The release of the same physical keypress must be ignored, otherwise
         // playback resumes immediately.
-        ui.handle_event(Event::Key(release));
+        ui.handle_event(Event::Key(release_event(KeyCode::Char(' '))));
         assert_eq!(ui.playback_state, PlaybackState::Paused);
     }
 
     #[test]
     fn key_release_events_must_not_quit_the_app() {
         let mut ui = test_ui();
-        let release = event::KeyEvent::new_with_kind(
-            KeyCode::Char('q'),
-            KeyModifiers::NONE,
-            event::KeyEventKind::Release,
-        );
 
-        ui.handle_event(Event::Key(release));
+        ui.handle_event(Event::Key(release_event(KeyCode::Char('q'))));
         assert_ne!(ui.state, UIState::Finished);
     }
 
     #[test]
-    fn key_release_events_must_not_step_an_extra_line() {
+    fn key_release_events_must_not_navigate_history_twice() {
         let mut ui = test_ui();
-        let press = event::KeyEvent::new_with_kind(
-            KeyCode::Char('l'),
-            KeyModifiers::NONE,
-            event::KeyEventKind::Press,
-        );
-        let release = event::KeyEvent::new_with_kind(
-            KeyCode::Char('l'),
-            KeyModifiers::NONE,
-            event::KeyEventKind::Release,
-        );
+        ui.load_commit(metadata("1111111", "first"));
+        ui.load_commit(metadata("2222222", "second"));
+        ui.load_commit(metadata("3333333", "third"));
 
-        ui.handle_event(Event::Key(press));
-        let after_press = ui.playback_state;
-        ui.handle_event(Event::Key(release));
-        assert_eq!(ui.playback_state, after_press);
+        ui.handle_event(Event::Key(press_event(KeyCode::Char('p'))));
+        assert_eq!(ui.history_index, Some(1));
+
+        ui.handle_event(Event::Key(release_event(KeyCode::Char('p'))));
+        assert_eq!(ui.history_index, Some(1));
     }
 
     #[test]
