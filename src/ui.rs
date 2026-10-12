@@ -565,7 +565,13 @@ impl<'a> UI<'a> {
     fn handle_event(&mut self, event: Event) {
         self.force_redraw = true;
         if let Event::Key(key) = event {
-            self.handle_key_event(key);
+            // On Windows, crossterm emits both a Press and a Release event for a single
+            // physical keypress ("Add key release event for windows", crossterm 0.26.0+).
+            // Acting on both makes every key fire twice, so e.g. Space pauses and then
+            // immediately resumes. Only act on the initial press.
+            if key.kind == event::KeyEventKind::Press {
+                self.handle_key_event(key);
+            }
         }
     }
 
@@ -1264,6 +1270,69 @@ mod tests {
         let rendered = buffer_text(terminal.backend().buffer());
         assert!(rendered.contains("Menu"));
         assert!(rendered.contains("Exit"));
+    }
+
+    /// Regression test for key release events on Windows.
+    ///
+    /// crossterm reports both a Press and a Release event for a single physical
+    /// keypress on Windows, so acting on every event makes one tap fire an action
+    /// twice. A single Space would pause and then instantly resume.
+    #[test]
+    fn key_release_events_must_not_trigger_a_second_action() {
+        let mut ui = test_ui();
+        assert_eq!(ui.playback_state, PlaybackState::Playing);
+
+        let press = event::KeyEvent::new_with_kind(
+            KeyCode::Char(' '),
+            KeyModifiers::NONE,
+            event::KeyEventKind::Press,
+        );
+        let release = event::KeyEvent::new_with_kind(
+            KeyCode::Char(' '),
+            KeyModifiers::NONE,
+            event::KeyEventKind::Release,
+        );
+
+        ui.handle_event(Event::Key(press));
+        assert_eq!(ui.playback_state, PlaybackState::Paused);
+
+        // The release of the same physical keypress must be ignored, otherwise
+        // playback resumes immediately.
+        ui.handle_event(Event::Key(release));
+        assert_eq!(ui.playback_state, PlaybackState::Paused);
+    }
+
+    #[test]
+    fn key_release_events_must_not_quit_the_app() {
+        let mut ui = test_ui();
+        let release = event::KeyEvent::new_with_kind(
+            KeyCode::Char('q'),
+            KeyModifiers::NONE,
+            event::KeyEventKind::Release,
+        );
+
+        ui.handle_event(Event::Key(release));
+        assert_ne!(ui.state, UIState::Finished);
+    }
+
+    #[test]
+    fn key_release_events_must_not_step_an_extra_line() {
+        let mut ui = test_ui();
+        let press = event::KeyEvent::new_with_kind(
+            KeyCode::Char('l'),
+            KeyModifiers::NONE,
+            event::KeyEventKind::Press,
+        );
+        let release = event::KeyEvent::new_with_kind(
+            KeyCode::Char('l'),
+            KeyModifiers::NONE,
+            event::KeyEventKind::Release,
+        );
+
+        ui.handle_event(Event::Key(press));
+        let after_press = ui.playback_state;
+        ui.handle_event(Event::Key(release));
+        assert_eq!(ui.playback_state, after_press);
     }
 
     #[test]
